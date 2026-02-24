@@ -1,28 +1,182 @@
 {
-  "max_items": 10,
-  "min_items": 3,
+  "meta": {
+    "version": "1.1",
+    "language": "ru",
+    "default_timezone": "America/Argentina/Buenos_Aires",
+    "max_items_per_digest": 10,
+    "min_items_per_digest": 3,
+    "lookback_hours": 72
+  },
   "feeds": [
     {
-      "name": "WeWorkRemotely",
-      "url": "https://weworkremotely.com/categories/remote-programming-jobs.rss",
-      "enabled": true
+      "id": "wwr_all",
+      "type": "rss",
+      "name": "We Work Remotely — All",
+      "url": "https://weworkremotely.com/remote-jobs.rss",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_wwr"]
     },
     {
-      "name": "RemoteOK",
-      "url": "https://remoteok.com/remote-dev-jobs.rss",
-      "enabled": true
+      "id": "wwr_product",
+      "type": "rss",
+      "name": "We Work Remotely — Product",
+      "url": "https://weworkremotely.com/categories/remote-product-jobs.rss",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_wwr", "cat_product"]
     },
     {
-      "name": "Remotive",
-      "url": "https://remotive.com/remote-jobs/software-dev.rss",
-      "enabled": true
+      "id": "wwr_design",
+      "type": "rss",
+      "name": "We Work Remotely — Design",
+      "url": "https://weworkremotely.com/categories/remote-design-jobs.rss",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_wwr", "cat_design"]
+    },
+    {
+      "id": "wwr_frontend",
+      "type": "rss",
+      "name": "We Work Remotely — Frontend",
+      "url": "https://weworkremotely.com/categories/remote-front-end-programming-jobs.rss",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_wwr", "cat_frontend"]
+    },
+    {
+      "id": "wwr_backend",
+      "type": "rss",
+      "name": "We Work Remotely — Backend",
+      "url": "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_wwr", "cat_backend"]
+    },
+
+    {
+      "id": "remotive_all",
+      "type": "rss",
+      "name": "Remotive — All",
+      "url": "https://remotive.com/feed",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_remotive"]
+    },
+
+    {
+      "id": "himalayas_all",
+      "type": "rss",
+      "name": "Himalayas — Recent 100",
+      "url": "https://himalayas.app/jobs/rss",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_himalayas"]
+    },
+
+    {
+      "id": "workanywhere_all",
+      "type": "rss",
+      "name": "WorkAnywhere.pro — All",
+      "url": "https://workanywhere.pro/rss.xml",
+      "enabled": true,
+      "weight": 0.9,
+      "tags": ["source_workanywhere"]
+    },
+    {
+      "id": "workanywhere_product",
+      "type": "rss",
+      "name": "WorkAnywhere.pro — Product",
+      "url": "https://workanywhere.pro/rss/product.xml",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_workanywhere", "cat_product"]
+    },
+    {
+      "id": "workanywhere_design",
+      "type": "rss",
+      "name": "WorkAnywhere.pro — Design",
+      "url": "https://workanywhere.pro/rss/design.xml",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_workanywhere", "cat_design"]
+    },
+    {
+      "id": "workanywhere_data_ai",
+      "type": "rss",
+      "name": "WorkAnywhere.pro — Data & AI",
+      "url": "https://workanywhere.pro/rss/data-ai.xml",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_workanywhere", "cat_data_ai"]
+    },
+    {
+      "id": "workanywhere_backend",
+      "type": "rss",
+      "name": "WorkAnywhere.pro — Backend",
+      "url": "https://workanywhere.pro/rss/backend.xml",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_workanywhere", "cat_backend"]
+    },
+    {
+      "id": "workanywhere_frontend",
+      "type": "rss",
+      "name": "WorkAnywhere.pro — Frontend",
+      "url": "https://workanywhere.pro/rss/frontend.xml",
+      "enabled": true,
+      "weight": 1.0,
+      "tags": ["source_workanywhere", "cat_frontend"]
+    },
+
+    {
+      "id": "realwork_anywhere_all",
+      "type": "rss",
+      "name": "RealWorkFromAnywhere — All",
+      "url": "https://www.realworkfromanywhere.com/rss.xml",
+      "enabled": true,
+      "weight": 0.8,
+      "tags": ["source_realwork"]
+    },
+
+    {
+      "id": "jobicy_all",
+      "type": "rss",
+      "name": "Jobicy — All",
+      "url": "https://jobicy.com/?feed=job_feed",
+      "enabled": true,
+      "weight": 0.8,
+      "tags": ["source_jobicy"]
     }
   ],
-  "include_keywords": [
-    "engineer", "developer", "backend", "frontend",
-    "product", "designer", "data", "ml", "ai"
-  ],
-  "exclude_keywords": [
-    "marketing", "sales", "seo"
-  ]
+
+  "filters": {
+    "include_keywords": [
+      "engineer", "developer", "software", "backend", "frontend", "full stack", "fullstack",
+      "data", "analytics", "analyst", "machine learning", "ml", "ai",
+      "devops", "sre", "platform", "cloud",
+      "product manager", "product", "pm",
+      "designer", "ux", "ui"
+    ],
+    "exclude_keywords": [
+      "sales", "marketing", "seo", "copywriter", "account executive", "real estate",
+      "adult", "crypto casino", "onlyfans"
+    ],
+
+    "geo_priority_keywords": [
+      "latam", "latin america",
+      "mexico", "brazil", "argentina", "chile", "colombia", "peru", "uruguay",
+      "usa", "united states", "us only", "north america"
+    ],
+
+    "remote_keywords": ["remote", "distributed", "work from home", "anywhere"],
+    "max_age_hours": 168,
+    "require_remote": true
+  },
+
+  "formatting": {
+    "title_template": "💼 Remote LATAM Jobs — {date_ru} • {time_ba} BA",
+    "footer_tags": ["#jobs", "#remote", "#latam"],
+    "max_per_post": 10
+  }
 }
