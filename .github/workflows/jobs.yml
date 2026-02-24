@@ -8,12 +8,19 @@ on:
 permissions:
   contents: write
 
+# Важно: не даём двум запускам одновременно пушить state.json
+concurrency:
+  group: latam-jobs-digest
+  cancel-in-progress: true
+
 jobs:
   run:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # чтобы можно было pull/rebase
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,10 +38,17 @@ jobs:
           TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
         run: python jobs_digest.py
 
-      - name: Commit state
+      - name: Commit state (safe)
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
+
+          # подтянуть актуальную main и аккуратно ребейзнуться
+          git pull --rebase origin main
+
           git add state.json
           git commit -m "Update state" || echo "No changes"
-          git push
+
+          # ещё раз на всякий случай, если параллельно кто-то успел запушить
+          git pull --rebase origin main
+          git push origin HEAD:main
