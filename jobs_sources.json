@@ -179,6 +179,6 @@
   "formatting": {
     "title_template": "💼 Remote LATAM Jobs — {date_ru} • {time_ba} BA",
     "footer_tags": ["#jobs", "#remote", "#latam"],
-    "max_items_per_digest": 12
+    "max_per_post": 12
   }
 }
