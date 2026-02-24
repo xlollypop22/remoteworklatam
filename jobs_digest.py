@@ -15,26 +15,20 @@ BA_TZ = timezone(timedelta(hours=-3))
 
 # LATAM countries (English mentions)
 LATAM_COUNTRIES = [
-    "mexico",
-    "brazil",
-    "argentina",
-    "chile",
-    "colombia",
-    "peru",
-    "uruguay",
-    "paraguay",
-    "bolivia",
-    "ecuador",
-    "venezuela",
-    "panama",
-    "costa rica",
-    "guatemala",
-    "honduras",
-    "el salvador",
-    "nicaragua",
-    "dominican",
-    "dominican republic",
-    "puerto rico",
+    # English
+    "mexico", "brazil", "argentina", "chile", "colombia", "peru", "uruguay",
+    "paraguay", "bolivia", "ecuador", "venezuela", "panama",
+    "costa rica", "guatemala", "honduras", "el salvador", "nicaragua",
+    "dominican", "dominican republic", "puerto rico",
+
+    # Spanish / Portuguese
+    "méxico", "brasil", "argentina", "chile", "colombia", "perú", "uruguay",
+    "paraguay", "bolivia", "ecuador", "venezuela", "panamá",
+    "costa rica", "guatemala", "honduras", "el salvador", "nicaragua",
+    "república dominicana", "puerto rico",
+
+    # Abbreviations / common short forms
+    "mx", "br", "ar", "cl", "co", "pe", "uy", "py", "bo", "ec", "ve", "pa", "cr", "gt", "hn", "sv", "ni", "do", "pr"
 ]
 
 
@@ -118,11 +112,19 @@ def fetch_rss(feed_id: str, url: str) -> List[Dict]:
     for e in getattr(parsed, "entries", []) or []:
         title = re.sub(r"\s+", " ", (getattr(e, "title", "") or "").strip())
         link = normalize_url(getattr(e, "link", "") or "")
-        summary = re.sub(
-            r"\s+",
-            " ",
-            (getattr(e, "summary", "") or getattr(e, "description", "") or "").strip(),
-        )
+
+        summary = (getattr(e, "summary", "") or getattr(e, "description", "") or "").strip()
+        summary = re.sub(r"\s+", " ", summary)
+
+        # 🔥 Добавляем категории/теги RSS (очень часто там есть гео)
+        cats = []
+        for t in getattr(e, "tags", []) or []:
+            term = (getattr(t, "term", "") or "").strip()
+            if term:
+                cats.append(term)
+        if cats:
+            summary = (summary + " | categories: " + ", ".join(cats)).strip()
+
         dt = parse_entry_date(e)
         if title and link:
             out.append(
@@ -296,8 +298,14 @@ def extract_remote_type(text: str, loc: str) -> str:
 
 def is_latam_job(text: str) -> bool:
     t = (text or "").lower()
+
+    # Region markers
     if "latin america" in t or "latam" in t:
         return True
+    if "south america" in t or "central america" in t or "caribbean" in t:
+        return True
+
+    # Country markers
     return any(country in t for country in LATAM_COUNTRIES)
 
 
