@@ -1,0 +1,28 @@
+{
+  "max_items": 10,
+  "min_items": 3,
+  "feeds": [
+    {
+      "name": "WeWorkRemotely",
+      "url": "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+      "enabled": true
+    },
+    {
+      "name": "RemoteOK",
+      "url": "https://remoteok.com/remote-dev-jobs.rss",
+      "enabled": true
+    },
+    {
+      "name": "Remotive",
+      "url": "https://remotive.com/remote-jobs/software-dev.rss",
+      "enabled": true
+    }
+  ],
+  "include_keywords": [
+    "engineer", "developer", "backend", "frontend",
+    "product", "designer", "data", "ml", "ai"
+  ],
+  "exclude_keywords": [
+    "marketing", "sales", "seo"
+  ]
+}
