@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
 
-# Важно: не даём двум запускам одновременно пушить state.json
 concurrency:
   group: latam-jobs-digest
   cancel-in-progress: true
@@ -20,18 +19,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # чтобы можно было pull/rebase
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # ВАЖНО: запускаем именно jobs_digest.py
       - name: Run script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -43,12 +43,10 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
 
-          # подтянуть актуальную main и аккуратно ребейзнуться
           git pull --rebase origin main
 
           git add state.json
           git commit -m "Update state" || echo "No changes"
 
-          # ещё раз на всякий случай, если параллельно кто-то успел запушить
           git pull --rebase origin main
           git push origin HEAD:main
