@@ -13,6 +13,30 @@ CHAT_ID = os.environ["TELEGRAM_CHANNEL"]
 
 BA_TZ = timezone(timedelta(hours=-3))
 
+# LATAM countries (English mentions)
+LATAM_COUNTRIES = [
+    "mexico",
+    "brazil",
+    "argentina",
+    "chile",
+    "colombia",
+    "peru",
+    "uruguay",
+    "paraguay",
+    "bolivia",
+    "ecuador",
+    "venezuela",
+    "panama",
+    "costa rica",
+    "guatemala",
+    "honduras",
+    "el salvador",
+    "nicaragua",
+    "dominican",
+    "dominican republic",
+    "puerto rico",
+]
+
 
 # ---------------- Time / formatting ----------------
 def now_ba() -> datetime:
@@ -129,7 +153,6 @@ def infer_tags(job: Dict) -> List[str]:
     t = (job["title"] + " " + (job.get("summary") or "")).lower()
     tags = []
 
-    # roles
     if "product manager" in t or re.search(r"\bpm\b", t):
         tags.append("#product")
     if "designer" in t or "ux" in t or "ui" in t:
@@ -147,7 +170,7 @@ def infer_tags(job: Dict) -> List[str]:
     if "devops" in t or "sre" in t or "kubernetes" in t:
         tags.append("#devops")
 
-    # geo
+    # LATAM geo tags only
     geo_map = [
         ("mexico", "#mexico"),
         ("brazil", "#brazil"),
@@ -156,12 +179,20 @@ def infer_tags(job: Dict) -> List[str]:
         ("colombia", "#colombia"),
         ("peru", "#peru"),
         ("uruguay", "#uruguay"),
+        ("paraguay", "#paraguay"),
+        ("bolivia", "#bolivia"),
+        ("ecuador", "#ecuador"),
+        ("venezuela", "#venezuela"),
+        ("panama", "#panama"),
+        ("costa rica", "#costarica"),
+        ("guatemala", "#guatemala"),
+        ("honduras", "#honduras"),
+        ("el salvador", "#elsalvador"),
+        ("nicaragua", "#nicaragua"),
+        ("dominican republic", "#dominican"),
+        ("puerto rico", "#puertorico"),
         ("latam", "#latam"),
         ("latin america", "#latam"),
-        ("usa", "#usa"),
-        ("united states", "#usa"),
-        ("worldwide", "#worldwide"),
-        ("anywhere", "#worldwide"),
     ]
     for kw, tg in geo_map:
         if kw in t and tg not in tags:
@@ -172,20 +203,14 @@ def infer_tags(job: Dict) -> List[str]:
 
 # ---------------- Extraction for structured карточки ----------------
 def extract_company(title: str) -> str:
-    """
-    Best-effort: пытаемся вытащить компанию из заголовка:
-    'Role at Company', 'Company: Role', 'Role — Company'
-    """
     t = (title or "").strip()
 
-    # Company: Role
     m = re.match(r"^([^:]{2,60}):\s+(.+)$", t)
     if m:
         company = m.group(1).strip()
         if 2 <= len(company) <= 60:
             return company
 
-    # Role at Company / Role @ Company / Role — Company / Role - Company
     m = re.search(r"\s(?:at|@|—|-)\s(.+)$", t, flags=re.I)
     if m:
         company = m.group(1).strip()
@@ -196,19 +221,14 @@ def extract_company(title: str) -> str:
 
 
 def extract_salary(text: str) -> str:
-    """
-    Best-effort зарплата из title+summary.
-    """
     if not text:
         return "—"
 
     t = text.replace(",", "")
-    # $4000-6000 / USD 4000-6000
     m = re.search(r"(\$|usd)\s?(\d{2,6})\s?(?:-|–|to)\s?(\d{2,6})", t, flags=re.I)
     if m:
         return f"${m.group(2)}–{m.group(3)}"
 
-    # $120k / USD 120k
     m = re.search(r"(\$|usd)\s?(\d{2,6})\s?(k)?", t, flags=re.I)
     if m:
         val = m.group(2)
@@ -216,7 +236,6 @@ def extract_salary(text: str) -> str:
             return f"${val}k"
         return f"${val}"
 
-    # 50k–70k (без валюты)
     m = re.search(r"\b(\d{2,3})\s?k\s?(?:-|–|to)\s?(\d{2,3})\s?k\b", t, flags=re.I)
     if m:
         return f"{m.group(1)}k–{m.group(2)}k"
@@ -224,24 +243,14 @@ def extract_salary(text: str) -> str:
     return "—"
 
 
-def extract_location_and_remote(text: str) -> Tuple[str, str]:
-    """
-    Возвращает (location, remote_type)
-    """
+def extract_latam_location(text: str) -> str:
     t = (text or "").lower()
+    # LATAM region keywords
+    if "latin america" in t or "latam" in t:
+        return "LATAM"
 
-    # remote type
-    remote_type = "Remote"
-    if "hybrid" in t:
-        remote_type = "Hybrid"
-    if "onsite" in t or "on-site" in t:
-        remote_type = "Onsite"
-
-    # location
-    loc = "—"
-    geo_rules = [
-        ("latin america", "LATAM"),
-        ("latam", "LATAM"),
+    # Country-level
+    mapping = [
         ("mexico", "Mexico"),
         ("brazil", "Brazil"),
         ("argentina", "Argentina"),
@@ -249,30 +258,60 @@ def extract_location_and_remote(text: str) -> Tuple[str, str]:
         ("colombia", "Colombia"),
         ("peru", "Peru"),
         ("uruguay", "Uruguay"),
-        ("united states", "USA"),
-        ("usa", "USA"),
-        ("worldwide", "Worldwide"),
-        ("anywhere", "Worldwide"),
-        ("global", "Worldwide"),
+        ("paraguay", "Paraguay"),
+        ("bolivia", "Bolivia"),
+        ("ecuador", "Ecuador"),
+        ("venezuela", "Venezuela"),
+        ("panama", "Panama"),
+        ("costa rica", "Costa Rica"),
+        ("guatemala", "Guatemala"),
+        ("honduras", "Honduras"),
+        ("el salvador", "El Salvador"),
+        ("nicaragua", "Nicaragua"),
+        ("dominican republic", "Dominican Republic"),
+        ("puerto rico", "Puerto Rico"),
     ]
-    for kw, name in geo_rules:
+    for kw, name in mapping:
         if kw in t:
-            loc = name
-            break
+            return name
 
-    # If явно LATAM — показываем Remote / LATAM
+    return "—"
+
+
+def extract_remote_type(text: str, loc: str) -> str:
+    t = (text or "").lower()
+    if "hybrid" in t:
+        return "Hybrid"
+    if "onsite" in t or "on-site" in t:
+        return "Onsite"
+    # We only publish LATAM jobs, so default remote label
     if loc == "LATAM":
-        remote_type = "Remote / LATAM"
+        return "Remote / LATAM"
+    # if конкретная страна LATAM
+    if loc != "—":
+        return "Remote"
+    # fallback
+    return "Remote"
 
-    return loc, remote_type
+
+def is_latam_job(text: str) -> bool:
+    t = (text or "").lower()
+    if "latin america" in t or "latam" in t:
+        return True
+    return any(country in t for country in LATAM_COUNTRIES)
 
 
 # ---------------- Scoring ----------------
 def score(job: Dict, filters: Dict) -> int:
     text = (job["title"] + " " + (job.get("summary") or "")).lower()
     s = 0
-    if text_contains_any(text, filters.get("geo_priority_keywords", [])):
-        s += 3
+
+    # LATAM boosted
+    if "latam" in text or "latin america" in text:
+        s += 4
+    if any(c in text for c in LATAM_COUNTRIES):
+        s += 2
+
     if text_contains_any(text, filters.get("remote_keywords", [])):
         s += 2
     if re.search(r"(\$|usd|\b\d{2,3}\s?k\b|\b\d{4,6}\b)", text, flags=re.I):
@@ -282,28 +321,29 @@ def score(job: Dict, filters: Dict) -> int:
     return s
 
 
-# ---------------- Market signal (free) ----------------
+# ---------------- Market signal ----------------
 def market_signal(jobs: List[Dict]) -> str:
     if not jobs:
         return "в выборке мало новых ролей."
 
-    all_text = " ".join((j["title"] + " " + (j.get("summary") or "")).lower() for j in jobs)
-
     salary_count = 0
-    for j in jobs:
-        if extract_salary(j["title"] + " " + (j.get("summary") or "")) != "—":
-            salary_count += 1
+    loc_counts: Dict[str, int] = {}
 
-    hints = []
-    for kw, name in [("fintech", "fintech"), ("saas", "B2B SaaS"), ("ai", "AI"), ("ml", "ML"), ("health", "health"), ("ecommerce", "e-commerce")]:
-        if kw in all_text:
-            hints.append(name)
+    for j in jobs:
+        full_text = j["title"] + " " + (j.get("summary") or "")
+        if extract_salary(full_text) != "—":
+            salary_count += 1
+        loc = extract_latam_location(full_text)
+        if loc != "—":
+            loc_counts[loc] = loc_counts.get(loc, 0) + 1
 
     msg = []
-    if hints:
-        msg.append(f"встречаются темы: {', '.join(hints[:3])}")
+    if loc_counts:
+        top_loc = sorted(loc_counts.items(), key=lambda x: x[1], reverse=True)[0][0]
+        msg.append(f"по гео чаще встречается: {top_loc}")
     if salary_count:
         msg.append(f"вилки/суммы указаны примерно у {salary_count} из {len(jobs)}")
+
     return "; ".join(msg) + "." if msg else "вакансии разнотипные, явного доминирующего тренда нет."
 
 
@@ -326,7 +366,7 @@ def tg_send_html(text_html: str) -> None:
         raise RuntimeError(str(data))
 
 
-# ---------------- Post builder (structured) ----------------
+# ---------------- Post builder ----------------
 def build_post(jobs: List[Dict], cfg: Dict) -> str:
     dt = now_ba()
     title = cfg.get("formatting", {}).get(
@@ -337,14 +377,10 @@ def build_post(jobs: List[Dict], cfg: Dict) -> str:
         time_ba=ru_time(dt),
     )
 
-    short_map = cfg.get("formatting", {}).get("source_short_names", {}) or {}
-    srcs = sorted(set(short_map.get(j["source"], j["source"]) for j in jobs))
-    srcs_short = ", ".join(srcs) if srcs else "RSS"
-
     out = []
     out.append(f"<b>{html_escape(title)}</b>\n")
-    out.append("Подборка свежих remote-вакансий (фокус: LATAM / USA / worldwide).\n")
-    out.append(f"Отобрано: <b>{len(jobs)}</b> • Источники: <b>{html_escape(srcs_short)}</b>\n")
+    out.append("Подборка свежих remote-вакансий\n")
+    out.append(f"Отобрано: <b>{len(jobs)}</b>\n")
 
     for i, j in enumerate(jobs, 1):
         full_text = (j["title"] + " " + (j.get("summary") or "")).strip()
@@ -352,7 +388,8 @@ def build_post(jobs: List[Dict], cfg: Dict) -> str:
         role = j["title"].strip()
         company = extract_company(j["title"])
         salary = extract_salary(full_text)
-        loc, remote_type = extract_location_and_remote(full_text)
+        loc = extract_latam_location(full_text)
+        remote_type = extract_remote_type(full_text, loc)
 
         tags = " ".join(infer_tags(j)) or "#jobs"
         link = f'<a href="{html_escape(j["link"])}">Откликнуться</a>'
@@ -384,13 +421,13 @@ def main() -> None:
     filters = cfg.get("filters", {})
     fmt = cfg.get("formatting", {})
 
-    max_items = int(meta.get("max_items_per_digest", fmt.get("max_per_post", 10)))
+    # от 3 до 12 (задаётся в jobs_sources.json)
+    max_items = int(meta.get("max_items_per_digest", 12))
     min_items = int(meta.get("min_items_per_digest", 3))
     lookback = int(meta.get("lookback_hours", 72))
 
     published = set(st.get("published", []))
 
-    # Collect
     collected: List[Dict] = []
     for f in feeds:
         if not f.get("enabled", True):
@@ -406,19 +443,23 @@ def main() -> None:
         except Exception as e:
             print(f"[WARN] feed {fid} failed: {e}")
 
-    # Filter
+    # Filter + LATAM-only gate
     fresh: List[Tuple[int, Dict, str]] = []
     for j in collected:
         if not within_lookback(j.get("dt"), lookback):
             continue
 
-        text = (j["title"] + " " + (j.get("summary") or "")).lower()
+        full_text = (j["title"] + " " + (j.get("summary") or "")).lower()
 
         inc = filters.get("include_keywords", [])
         exc = filters.get("exclude_keywords", [])
-        if inc and not text_contains_any(text, inc):
+        if inc and not text_contains_any(full_text, inc):
             continue
-        if exc and text_contains_any(text, exc):
+        if exc and text_contains_any(full_text, exc):
+            continue
+
+        # LATAM-only фильтр: берём только если есть LATAM/страна в тексте
+        if not is_latam_job(full_text):
             continue
 
         key = job_key(j)
@@ -428,10 +469,9 @@ def main() -> None:
         fresh.append((score(j, filters), j, key))
 
     if not fresh:
-        print("[INFO] no new jobs")
+        print("[INFO] no new LATAM jobs")
         return
 
-    # Sort by score, then date
     fresh.sort(
         key=lambda x: (
             x[0],
@@ -440,7 +480,6 @@ def main() -> None:
         reverse=True,
     )
 
-    # Choose
     chosen: List[Tuple[Dict, str]] = []
     for _, j, key in fresh:
         chosen.append((j, key))
@@ -455,7 +494,6 @@ def main() -> None:
     post = build_post(jobs, cfg)
     tg_send_html(post)
 
-    # Update state
     for _, key in chosen:
         published.add(key)
 
