@@ -2,6 +2,7 @@ import os
 import json
 import hashlib
 import re
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 
@@ -13,22 +14,19 @@ CHAT_ID = os.environ["TELEGRAM_CHANNEL"]
 
 BA_TZ = timezone(timedelta(hours=-3))
 
-# LATAM countries (English mentions)
+# LATAM countries / mentions (EN + ES/PT + abbreviations)
 LATAM_COUNTRIES = [
     # English
-    "mexico", "brazil", "argentina", "chile", "colombia", "peru", "uruguay",
-    "paraguay", "bolivia", "ecuador", "venezuela", "panama",
-    "costa rica", "guatemala", "honduras", "el salvador", "nicaragua",
-    "dominican", "dominican republic", "puerto rico",
-
+    "mexico", "brazil", "argentina", "chile", "colombia", "peru", "uruguay", "paraguay",
+    "bolivia", "ecuador", "venezuela", "panama", "costa rica", "guatemala", "honduras",
+    "el salvador", "nicaragua", "dominican", "dominican republic", "puerto rico",
     # Spanish / Portuguese
-    "méxico", "brasil", "argentina", "chile", "colombia", "perú", "uruguay",
-    "paraguay", "bolivia", "ecuador", "venezuela", "panamá",
-    "costa rica", "guatemala", "honduras", "el salvador", "nicaragua",
-    "república dominicana", "puerto rico",
-
+    "méxico", "brasil", "argentina", "chile", "colombia", "perú", "uruguay", "paraguay",
+    "bolivia", "ecuador", "venezuela", "panamá", "costa rica", "guatemala", "honduras",
+    "el salvador", "nicaragua", "república dominicana", "puerto rico",
     # Abbreviations / common short forms
-    "mx", "br", "ar", "cl", "co", "pe", "uy", "py", "bo", "ec", "ve", "pa", "cr", "gt", "hn", "sv", "ni", "do", "pr"
+    "mx", "br", "ar", "cl", "co", "pe", "uy", "py", "bo", "ec", "ve", "pa", "cr", "gt",
+    "hn", "sv", "ni", "do", "pr",
 ]
 
 
@@ -46,9 +44,9 @@ def ru_time(dt: datetime) -> str:
 
 
 def html_escape(s: str) -> str:
+    s = s or ""
     return (
-        (s or "")
-        .replace("&", "&amp;")
+        s.replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
@@ -59,7 +57,12 @@ def normalize_url(url: str) -> str:
     if not url:
         return url
     url = url.strip().split("#", 1)[0]
-    url = re.sub(r"(\?|&)(utm_[^=]+|ref|source|fbclid|gclid)=[^&]+", "", url, flags=re.I)
+    url = re.sub(
+        r"(\?|&)(utm_[^=]+|ref|source|fbclid|gclid)=[^&]+",
+        "",
+        url,
+        flags=re.I,
+    )
     url = url.replace("?&", "?").rstrip("?&")
     return url
 
@@ -69,8 +72,8 @@ def sha(s: str) -> str:
 
 
 def text_contains_any(text: str, keywords: List[str]) -> bool:
-    t = text.lower()
-    return any(k.lower() in t for k in keywords)
+    t = (text or "").lower()
+    return any((k or "").lower() in t for k in keywords)
 
 
 # ---------------- IO ----------------
@@ -112,11 +115,10 @@ def fetch_rss(feed_id: str, url: str) -> List[Dict]:
     for e in getattr(parsed, "entries", []) or []:
         title = re.sub(r"\s+", " ", (getattr(e, "title", "") or "").strip())
         link = normalize_url(getattr(e, "link", "") or "")
-
         summary = (getattr(e, "summary", "") or getattr(e, "description", "") or "").strip()
         summary = re.sub(r"\s+", " ", summary)
 
-        # 🔥 Добавляем категории/теги RSS (очень часто там есть гео)
+        # RSS categories/tags often contain geo; keep them in summary for filtering
         cats = []
         for t in getattr(e, "tags", []) or []:
             term = (getattr(t, "term", "") or "").strip()
@@ -147,111 +149,23 @@ def within_lookback(dt: Optional[datetime], hours: int) -> bool:
 
 # ---------------- Dedup key ----------------
 def job_key(job: Dict) -> str:
-    return sha(f"{normalize_url(job['link'])}::{job['title'].lower().strip()}")
+    return sha(f"{normalize_url(job['link'])}::{(job['title'] or '').lower().strip()}")
 
 
-# ---------------- Tagging (lightweight) ----------------
-def infer_tags(job: Dict) -> List[str]:
-    t = (job["title"] + " " + (job.get("summary") or "")).lower()
-    tags = []
-
-    if "product manager" in t or re.search(r"\bpm\b", t):
-        tags.append("#product")
-    if "designer" in t or "ux" in t or "ui" in t:
-        tags.append("#design")
-    if "backend" in t:
-        tags.append("#backend")
-    if "frontend" in t or "front-end" in t:
-        tags.append("#frontend")
-    if "full stack" in t or "fullstack" in t:
-        tags.append("#fullstack")
-    if "data" in t or "analytics" in t or "analyst" in t:
-        tags.append("#data")
-    if "machine learning" in t or re.search(r"\bml\b", t) or re.search(r"\bai\b", t):
-        tags.append("#ai")
-    if "devops" in t or "sre" in t or "kubernetes" in t:
-        tags.append("#devops")
-
-    # LATAM geo tags only
-    geo_map = [
-        ("mexico", "#mexico"),
-        ("brazil", "#brazil"),
-        ("argentina", "#argentina"),
-        ("chile", "#chile"),
-        ("colombia", "#colombia"),
-        ("peru", "#peru"),
-        ("uruguay", "#uruguay"),
-        ("paraguay", "#paraguay"),
-        ("bolivia", "#bolivia"),
-        ("ecuador", "#ecuador"),
-        ("venezuela", "#venezuela"),
-        ("panama", "#panama"),
-        ("costa rica", "#costarica"),
-        ("guatemala", "#guatemala"),
-        ("honduras", "#honduras"),
-        ("el salvador", "#elsalvador"),
-        ("nicaragua", "#nicaragua"),
-        ("dominican republic", "#dominican"),
-        ("puerto rico", "#puertorico"),
-        ("latam", "#latam"),
-        ("latin america", "#latam"),
-    ]
-    for kw, tg in geo_map:
-        if kw in t and tg not in tags:
-            tags.append(tg)
-
-    return tags[:6]
-
-
-# ---------------- Extraction for structured карточки ----------------
-def extract_company(title: str) -> str:
-    t = (title or "").strip()
-
-    m = re.match(r"^([^:]{2,60}):\s+(.+)$", t)
-    if m:
-        company = m.group(1).strip()
-        if 2 <= len(company) <= 60:
-            return company
-
-    m = re.search(r"\s(?:at|@|—|-)\s(.+)$", t, flags=re.I)
-    if m:
-        company = m.group(1).strip()
-        if 2 <= len(company) <= 60:
-            return company
-
-    return "—"
-
-
-def extract_salary(text: str) -> str:
-    if not text:
-        return "—"
-
-    t = text.replace(",", "")
-    m = re.search(r"(\$|usd)\s?(\d{2,6})\s?(?:-|–|to)\s?(\d{2,6})", t, flags=re.I)
-    if m:
-        return f"${m.group(2)}–{m.group(3)}"
-
-    m = re.search(r"(\$|usd)\s?(\d{2,6})\s?(k)?", t, flags=re.I)
-    if m:
-        val = m.group(2)
-        if m.group(3):
-            return f"${val}k"
-        return f"${val}"
-
-    m = re.search(r"\b(\d{2,3})\s?k\s?(?:-|–|to)\s?(\d{2,3})\s?k\b", t, flags=re.I)
-    if m:
-        return f"{m.group(1)}k–{m.group(2)}k"
-
-    return "—"
+# ---------------- Geo / LATAM gate ----------------
+def is_latam_job(text: str) -> bool:
+    t = (text or "").lower()
+    if "latin america" in t or "latam" in t:
+        return True
+    if "south america" in t or "central america" in t or "caribbean" in t:
+        return True
+    return any(country in t for country in LATAM_COUNTRIES)
 
 
 def extract_latam_location(text: str) -> str:
     t = (text or "").lower()
-    # LATAM region keywords
     if "latin america" in t or "latam" in t:
         return "LATAM"
-
-    # Country-level
     mapping = [
         ("mexico", "Mexico"),
         ("brazil", "Brazil"),
@@ -276,83 +190,105 @@ def extract_latam_location(text: str) -> str:
     for kw, name in mapping:
         if kw in t:
             return name
+    return "—"
+
+
+# ---------------- Company / track / grade ----------------
+def extract_company(title: str) -> str:
+    t = (title or "").strip()
+
+    # "Company: Role"
+    m = re.match(r"^([^:]{2,60}):\s+(.+)$", t)
+    if m:
+        company = m.group(1).strip()
+        if 2 <= len(company) <= 60:
+            return company
+
+    # "Role at Company" / "Role — Company" / "Role - Company"
+    m = re.search(r"\s(?:at|@|—|-)\s(.+)$", t, flags=re.I)
+    if m:
+        company = m.group(1).strip()
+        if 2 <= len(company) <= 60:
+            return company
 
     return "—"
 
 
-def extract_remote_type(text: str, loc: str) -> str:
-    t = (text or "").lower()
-    if "hybrid" in t:
-        return "Hybrid"
-    if "onsite" in t or "on-site" in t:
-        return "Onsite"
-    # We only publish LATAM jobs, so default remote label
-    if loc == "LATAM":
-        return "Remote / LATAM"
-    # if конкретная страна LATAM
-    if loc != "—":
-        return "Remote"
-    # fallback
-    return "Remote"
-
-
-def is_latam_job(text: str) -> bool:
+def infer_track(text: str) -> str:
     t = (text or "").lower()
 
-    # Region markers
-    if "latin america" in t or "latam" in t:
-        return True
-    if "south america" in t or "central america" in t or "caribbean" in t:
-        return True
+    # Events / Community
+    if any(k in t for k in ["event", "events", "event manager", "event coordinator", "community manager"]):
+        return "Events"
 
-    # Country markers
-    return any(country in t for country in LATAM_COUNTRIES)
+    # Project / Program / Delivery
+    if any(k in t for k in ["project manager", "project", "program manager", "pmo", "scrum master", "delivery manager", "implementation manager"]):
+        return "Project"
+
+    # Product
+    if any(k in t for k in ["product manager", "product owner", "product lead", "growth product", "product ops", "product operations"]):
+        return "Product"
+
+    # Design
+    if any(k in t for k in ["designer", "design", "ux", "ui", "product design", "visual designer", "graphic"]):
+        return "Design"
+
+    # Data / AI / Research
+    if any(k in t for k in ["data", "analytics", "analyst", "bi ", "business intelligence", "machine learning", "ml", "ai", "research"]):
+        return "Data/AI"
+
+    # DevOps / Security
+    if any(k in t for k in ["devops", "sre", "platform", "cloud", "kubernetes", "secops", "security"]):
+        return "DevOps/Sec"
+
+    # Engineering
+    if any(k in t for k in ["engineer", "developer", "backend", "frontend", "fullstack", "full stack", "software"]):
+        return "Engineering"
+
+    # Support / Ops
+    if any(k in t for k in ["support", "customer", "success", "operations", "ops", "contact center"]):
+        return "Support/Ops"
+
+    return "Other"
 
 
-# ---------------- Scoring ----------------
+def infer_seniority(text: str) -> str:
+    t = (text or "").lower()
+
+    # C-level / VP
+    if any(k in t for k in ["ceo", "cto", "cpo", "cfo", "coo", "chief ", "vp ", "vice president"]):
+        return "C-level/VP"
+
+    if any(k in t for k in ["head", "director"]):
+        return "Head/Director"
+
+    if any(k in t for k in ["lead", "principal", "staff"]):
+        return "Lead"
+
+    if any(k in t for k in ["senior", "sr.", "sr ", "sênior", "senior-level"]):
+        return "Senior"
+
+    if any(k in t for k in ["middle", "mid-level", "mid ", "pleno"]):
+        return "Middle"
+
+    if any(k in t for k in ["junior", "jr.", "jr ", "júnior", "entry level", "entry-level", "intern"]):
+        return "Junior"
+
+    return "—"
+
+
 def score(job: Dict, filters: Dict) -> int:
     text = (job["title"] + " " + (job.get("summary") or "")).lower()
     s = 0
-
-    # LATAM boosted
     if "latam" in text or "latin america" in text:
         s += 4
     if any(c in text for c in LATAM_COUNTRIES):
         s += 2
-
     if text_contains_any(text, filters.get("remote_keywords", [])):
-        s += 2
-    if re.search(r"(\$|usd|\b\d{2,3}\s?k\b|\b\d{4,6}\b)", text, flags=re.I):
         s += 1
-    if re.search(r"\bsenior\b|\blead\b|\bstaff\b|\bprincipal\b", text, flags=re.I):
+    if re.search(r"\bsenior\b|\blead\b|\bstaff\b|\bprincipal\b|\bhead\b|\bdirector\b", text, flags=re.I):
         s += 1
     return s
-
-
-# ---------------- Market signal ----------------
-def market_signal(jobs: List[Dict]) -> str:
-    if not jobs:
-        return "в выборке мало новых ролей."
-
-    salary_count = 0
-    loc_counts: Dict[str, int] = {}
-
-    for j in jobs:
-        full_text = j["title"] + " " + (j.get("summary") or "")
-        if extract_salary(full_text) != "—":
-            salary_count += 1
-        loc = extract_latam_location(full_text)
-        if loc != "—":
-            loc_counts[loc] = loc_counts.get(loc, 0) + 1
-
-    msg = []
-    if loc_counts:
-        top_loc = sorted(loc_counts.items(), key=lambda x: x[1], reverse=True)[0][0]
-        msg.append(f"по гео чаще встречается: {top_loc}")
-    if salary_count:
-        msg.append(f"вилки/суммы указаны примерно у {salary_count} из {len(jobs)}")
-
-    return "; ".join(msg) + "." if msg else "вакансии разнотипные, явного доминирующего тренда нет."
 
 
 # ---------------- Telegram ----------------
@@ -379,39 +315,67 @@ def build_post(jobs: List[Dict], cfg: Dict) -> str:
     dt = now_ba()
     title = cfg.get("formatting", {}).get(
         "title_template",
-        "💼 Remote LATAM Jobs — {date_ru} • {time_ba} BA"
-    ).format(
-        date_ru=ru_date(dt),
-        time_ba=ru_time(dt),
-    )
+        "💼 Remote LATAM Jobs — {date_ru} • {time_ba} BA",
+    ).format(date_ru=ru_date(dt), time_ba=ru_time(dt))
 
-    out = []
-    out.append(f"<b>{html_escape(title)}</b>\n")
-    out.append("Подборка свежих remote-вакансий\n")
-    out.append(f"Отобрано: <b>{len(jobs)}</b>\n")
-
-    for i, j in enumerate(jobs, 1):
+    # Group by track
+    sections: Dict[str, List[Dict]] = defaultdict(list)
+    for j in jobs:
         full_text = (j["title"] + " " + (j.get("summary") or "")).strip()
+        sections[infer_track(full_text)].append(j)
 
-        role = j["title"].strip()
-        company = extract_company(j["title"])
-        salary = extract_salary(full_text)
-        loc = extract_latam_location(full_text)
-        remote_type = extract_remote_type(full_text, loc)
+    order = ["Design", "Product", "Project", "Events", "Engineering", "Data/AI", "DevOps/Sec", "Support/Ops", "Other"]
+    track_emoji = {
+        "Design": "🎨",
+        "Product": "🧩",
+        "Project": "🗂",
+        "Events": "🎤",
+        "Engineering": "🛠",
+        "Data/AI": "📊",
+        "DevOps/Sec": "🔐",
+        "Support/Ops": "🧑‍💻",
+        "Other": "📌",
+    }
 
-        tags = " ".join(infer_tags(j)) or "#jobs"
-        link = f'<a href="{html_escape(j["link"])}">Откликнуться</a>'
+    out: List[str] = []
+    out.append(f"<b>{html_escape(title)}</b>\n")
+    out.append(f"{len(jobs)} вакансий • обновление каждые 4 часа\n")
 
-        out.append(
-            f"\n<b>{i}️⃣ {html_escape(role)}</b>\n"
-            f"🏢 {html_escape(company)} ({html_escape(loc)})\n"
-            f"💰 {html_escape(salary)}\n"
-            f"🌍 {html_escape(remote_type)}\n"
-            f"🔗 {link}\n"
-            f"🏷 {html_escape(tags)}\n"
-        )
+    idx = 1
+    for track in order:
+        items = sections.get(track, [])
+        if not items:
+            continue
 
-    out.append(f"\n📌 <b>Сигнал рынка:</b> {html_escape(market_signal(jobs))}\n")
+        out.append(f"\n<b>{track_emoji.get(track,'📌')} {html_escape(track)} ({len(items)})</b>\n")
+
+        for j in items:
+            full_text = (j["title"] + " " + (j.get("summary") or "")).strip()
+
+            role = (j["title"] or "").strip()
+            company = extract_company(role)
+            loc = extract_latam_location(full_text)
+            grade = infer_seniority(full_text)
+
+            meta_parts = []
+            if loc != "—":
+                meta_parts.append(loc)
+            if grade != "—":
+                meta_parts.append(grade)
+
+            meta = " · ".join(meta_parts)
+            meta_str = f" <i>({html_escape(meta)})</i>" if meta else ""
+
+            if company != "—":
+                line_left = f"{idx}) <b>{html_escape(role)}</b> — {html_escape(company)}{meta_str}"
+            else:
+                line_left = f"{idx}) <b>{html_escape(role)}</b>{meta_str}"
+
+            link = j["link"]
+            apply = f'<a href="{html_escape(link)}">Apply</a>'
+
+            out.append(f"{line_left} · {apply}\n")
+            idx += 1
 
     footer = cfg.get("formatting", {}).get("footer_tags", ["#jobs", "#remote", "#latam"])
     out.append("\n" + " ".join(footer))
@@ -427,10 +391,8 @@ def main() -> None:
     meta = cfg.get("meta", {})
     feeds = cfg.get("feeds", [])
     filters = cfg.get("filters", {})
-    fmt = cfg.get("formatting", {})
 
-    # от 3 до 12 (задаётся в jobs_sources.json)
-    max_items = int(meta.get("max_items_per_digest", 12))
+    max_items = int(meta.get("max_items_per_digest", 8))
     min_items = int(meta.get("min_items_per_digest", 3))
     lookback = int(meta.get("lookback_hours", 72))
 
@@ -451,7 +413,6 @@ def main() -> None:
         except Exception as e:
             print(f"[WARN] feed {fid} failed: {e}")
 
-    # Filter + LATAM-only gate
     fresh: List[Tuple[int, Dict, str]] = []
     for j in collected:
         if not within_lookback(j.get("dt"), lookback):
@@ -461,12 +422,13 @@ def main() -> None:
 
         inc = filters.get("include_keywords", [])
         exc = filters.get("exclude_keywords", [])
+
         if inc and not text_contains_any(full_text, inc):
             continue
         if exc and text_contains_any(full_text, exc):
             continue
 
-        # LATAM-only фильтр: берём только если есть LATAM/страна в тексте
+        # Strict LATAM-only
         if not is_latam_job(full_text):
             continue
 
@@ -504,7 +466,6 @@ def main() -> None:
 
     for _, key in chosen:
         published.add(key)
-
     st["published"] = list(published)[-5000:]
     save_state(st)
 
