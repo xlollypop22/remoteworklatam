@@ -5,6 +5,7 @@ import re
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import feedparser
 import httpx
@@ -54,9 +55,11 @@ def html_escape(s: str) -> str:
 
 
 def normalize_url(url: str) -> str:
+    """Normalize and remove fragments and common tracking query params."""
     if not url:
         return url
     url = url.strip().split("#", 1)[0]
+    # remove common tracking params (best-effort)
     url = re.sub(
         r"(\?|&)(utm_[^=]+|ref|source|fbclid|gclid)=[^&]+",
         "",
@@ -65,6 +68,13 @@ def normalize_url(url: str) -> str:
     )
     url = url.replace("?&", "?").rstrip("?&")
     return url
+
+
+def strip_query(url: str) -> str:
+    """Hard strip all query params (to improve dedupe)."""
+    if not url:
+        return url
+    return url.split("?", 1)[0]
 
 
 def sha(s: str) -> str:
@@ -149,7 +159,12 @@ def within_lookback(dt: Optional[datetime], hours: int) -> bool:
 
 # ---------------- Dedup key ----------------
 def job_key(job: Dict) -> str:
-    return sha(f"{normalize_url(job['link'])}::{(job['title'] or '').lower().strip()}")
+    """
+    Strong dedupe by link without query.
+    This collapses duplicates where platforms add different tracking params.
+    """
+    link = strip_query(normalize_url(job.get("link", "")))
+    return sha(link)
 
 
 # ---------------- Geo / LATAM gate ----------------
@@ -166,8 +181,10 @@ def extract_latam_location(text: str) -> str:
     t = (text or "").lower()
     if "latin america" in t or "latam" in t:
         return "LATAM"
+
     mapping = [
         ("mexico", "Mexico"),
+        ("brasil", "Brazil"),
         ("brazil", "Brazil"),
         ("argentina", "Argentina"),
         ("chile", "Chile"),
@@ -193,23 +210,75 @@ def extract_latam_location(text: str) -> str:
     return "—"
 
 
-# ---------------- Company / track / grade ----------------
-def extract_company(title: str) -> str:
-    t = (title or "").strip()
+# ---------------- Role / company parsing ----------------
+def clean_parens(s: str) -> str:
+    """Remove repeated trailing parens fragments that often contain remote/geo noise."""
+    s = (s or "").strip()
+    # if title ends with many nested parens, keep first chunk
+    # but do NOT delete important role words.
+    return re.sub(r"\s+\((?:remote|work from anywhere|wfh|hybrid|on-site|onsite|.*?us.*?|.*?usa.*?|.*?united states.*?|.*?\d{4,}.*?)\)\s*$",
+                  "", s, flags=re.I).strip()
+
+
+def split_role_company(title: str) -> Tuple[str, str]:
+    """
+    Try to split: "Role at Company", "Company: Role", "Role — Company".
+    Returns (role, company). Company can be "—".
+    """
+    t = clean_parens((title or "").strip())
+
+    # "Role at Company"
+    m = re.match(
+        r"^(?P<role>.+?)\s+\bat\s+(?P<company>[^—|-]{2,80})\s*(?:[—-].*)?$",
+        t,
+        flags=re.I,
+    )
+    if m:
+        role = m.group("role").strip()
+        company = m.group("company").strip()
+        company = re.sub(r"\s+\(.*$", "", company).strip()
+        return role, company
 
     # "Company: Role"
-    m = re.match(r"^([^:]{2,60}):\s+(.+)$", t)
+    m = re.match(r"^(?P<company>[^:]{2,80}):\s*(?P<role>.+)$", t)
     if m:
-        company = m.group(1).strip()
-        if 2 <= len(company) <= 60:
-            return company
+        company = m.group("company").strip()
+        role = m.group("role").strip()
+        return role, company
 
-    # "Role at Company" / "Role — Company" / "Role - Company"
-    m = re.search(r"\s(?:at|@|—|-)\s(.+)$", t, flags=re.I)
+    # "Role — Company" or "Role - Company"
+    m = re.match(r"^(?P<role>.+?)\s+[—-]\s+(?P<company>[^()]{2,80}).*$", t)
     if m:
-        company = m.group(1).strip()
-        if 2 <= len(company) <= 60:
-            return company
+        role = m.group("role").strip()
+        company = m.group("company").strip()
+        company = re.sub(r"\s+\(.*$", "", company).strip()
+        return role, company
+
+    return t, "—"
+
+
+# ---------------- Track / seniority ----------------
+def infer_seniority(text: str) -> str:
+    t = (text or "").lower()
+
+    # strict word boundaries: avoid matching "coo" inside "coordinator"
+    if re.search(r"\b(ceo|cto|cpo|cfo|coo)\b", t) or re.search(r"\b(vp|vice president)\b", t):
+        return "C-level/VP"
+
+    if re.search(r"\b(head|director)\b", t):
+        return "Head/Director"
+
+    if re.search(r"\b(lead|principal|staff)\b", t):
+        return "Lead"
+
+    if re.search(r"\b(senior|sr)\b", t):
+        return "Senior"
+
+    if re.search(r"\b(mid|middle|mid-level|pleno)\b", t):
+        return "Middle"
+
+    if re.search(r"\b(junior|jr|entry level|entry-level|intern|internship)\b", t):
+        return "Junior"
 
     return "—"
 
@@ -217,64 +286,41 @@ def extract_company(title: str) -> str:
 def infer_track(text: str) -> str:
     t = (text or "").lower()
 
-    # Events / Community
-    if any(k in t for k in ["event", "events", "event manager", "event coordinator", "community manager"]):
-        return "Events"
-
-    # Project / Program / Delivery
-    if any(k in t for k in ["project manager", "project", "program manager", "pmo", "scrum master", "delivery manager", "implementation manager"]):
-        return "Project"
-
-    # Product
-    if any(k in t for k in ["product manager", "product owner", "product lead", "growth product", "product ops", "product operations"]):
-        return "Product"
-
-    # Design
-    if any(k in t for k in ["designer", "design", "ux", "ui", "product design", "visual designer", "graphic"]):
+    # Design: only real design signals (avoid "workflow design")
+    if re.search(r"\b(designer|ux|ui|product designer|ux researcher|ui designer|visual designer|graphic designer)\b", t):
         return "Design"
 
-    # Data / AI / Research
-    if any(k in t for k in ["data", "analytics", "analyst", "bi ", "business intelligence", "machine learning", "ml", "ai", "research"]):
+    # Product
+    if re.search(r"\b(product manager|product owner|product lead|growth product|product ops|product operations)\b", t):
+        return "Product"
+
+    # Project / Program
+    if re.search(r"\b(project manager|program manager|scrum master|pmo|delivery manager|implementation manager)\b", t):
+        return "Project"
+
+    # Data/AI
+    if re.search(r"\b(data scientist|data engineer|data analyst|research analyst|analyst|analytics|business intelligence|bi)\b", t):
+        return "Data/AI"
+    if re.search(r"\b(machine learning|ml engineer|ai engineer|ai)\b", t):
         return "Data/AI"
 
-    # DevOps / Security
-    if any(k in t for k in ["devops", "sre", "platform", "cloud", "kubernetes", "secops", "security"]):
+    # DevOps/Sec
+    if re.search(r"\b(devops|sre|site reliability|platform engineer|cloud engineer|kubernetes|secops|security engineer)\b", t):
         return "DevOps/Sec"
 
     # Engineering
-    if any(k in t for k in ["engineer", "developer", "backend", "frontend", "fullstack", "full stack", "software"]):
+    if re.search(r"\b(engineer|developer|software engineer|backend|frontend|fullstack|full stack|php|python|java|golang|node|react|servicenow|clojure)\b", t):
         return "Engineering"
 
-    # Support / Ops
-    if any(k in t for k in ["support", "customer", "success", "operations", "ops", "contact center"]):
+    # Events: strict word boundaries
+    if re.search(r"\b(event manager|event coordinator)\b", t) or re.search(r"\b(event|events)\b", t):
+        return "Events"
+
+    # Support/Ops
+    if re.search(r"\b(customer support|support|customer success|operations|ops|contact center)\b", t):
         return "Support/Ops"
 
     return "Other"
-
-
-def infer_seniority(text: str) -> str:
-    t = (text or "").lower()
-
-    # C-level / VP
-    if any(k in t for k in ["ceo", "cto", "cpo", "cfo", "coo", "chief ", "vp ", "vice president"]):
-        return "C-level/VP"
-
-    if any(k in t for k in ["head", "director"]):
-        return "Head/Director"
-
-    if any(k in t for k in ["lead", "principal", "staff"]):
-        return "Lead"
-
-    if any(k in t for k in ["senior", "sr.", "sr ", "sênior", "senior-level"]):
-        return "Senior"
-
-    if any(k in t for k in ["middle", "mid-level", "mid ", "pleno"]):
-        return "Middle"
-
-    if any(k in t for k in ["junior", "jr.", "jr ", "júnior", "entry level", "entry-level", "intern"]):
-        return "Junior"
-
-    return "—"
 
 
 def score(job: Dict, filters: Dict) -> int:
@@ -286,7 +332,7 @@ def score(job: Dict, filters: Dict) -> int:
         s += 2
     if text_contains_any(text, filters.get("remote_keywords", [])):
         s += 1
-    if re.search(r"\bsenior\b|\blead\b|\bstaff\b|\bprincipal\b|\bhead\b|\bdirector\b", text, flags=re.I):
+    if re.search(r"\b(senior|lead|staff|principal|head|director)\b", text, flags=re.I):
         s += 1
     return s
 
@@ -338,8 +384,8 @@ def build_post(jobs: List[Dict], cfg: Dict) -> str:
     }
 
     out: List[str] = []
+    # ONLY title in header (no time line, no "N jobs..." line)
     out.append(f"<b>{html_escape(title)}</b>\n")
-    out.append(f"{len(jobs)} вакансий • обновление каждые 4 часа\n")
 
     idx = 1
     for track in order:
@@ -352,8 +398,7 @@ def build_post(jobs: List[Dict], cfg: Dict) -> str:
         for j in items:
             full_text = (j["title"] + " " + (j.get("summary") or "")).strip()
 
-            role = (j["title"] or "").strip()
-            company = extract_company(role)
+            role, company = split_role_company(j["title"] or "")
             loc = extract_latam_location(full_text)
             grade = infer_seniority(full_text)
 
@@ -364,15 +409,15 @@ def build_post(jobs: List[Dict], cfg: Dict) -> str:
                 meta_parts.append(grade)
 
             meta = " · ".join(meta_parts)
-            meta_str = f" <i>({html_escape(meta)})</i>" if meta else ""
+            meta_str = f" <i>[{html_escape(meta)}]</i>" if meta else ""
+
+            link = strip_query(normalize_url(j["link"]))
+            apply = f'<a href="{html_escape(link)}">Apply</a>'
 
             if company != "—":
                 line_left = f"{idx}) <b>{html_escape(role)}</b> — {html_escape(company)}{meta_str}"
             else:
                 line_left = f"{idx}) <b>{html_escape(role)}</b>{meta_str}"
-
-            link = j["link"]
-            apply = f'<a href="{html_escape(link)}">Apply</a>'
 
             out.append(f"{line_left} · {apply}\n")
             idx += 1
@@ -466,6 +511,8 @@ def main() -> None:
 
     for _, key in chosen:
         published.add(key)
+
+    # keep last N published keys
     st["published"] = list(published)[-5000:]
     save_state(st)
 
