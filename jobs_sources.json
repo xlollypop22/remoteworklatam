@@ -1,9 +1,9 @@
 {
   "meta": {
-    "version": "1.2",
+    "version": "1.3",
     "language": "ru",
     "default_timezone": "America/Argentina/Buenos_Aires",
-    "max_items_per_digest": 12,
+    "max_items_per_digest": 8,
     "min_items_per_digest": 3,
     "lookback_hours": 72
   },
@@ -53,7 +53,6 @@
       "weight": 1.0,
       "tags": ["source_wwr", "cat_backend"]
     },
-
     {
       "id": "remotive_all",
       "type": "rss",
@@ -63,7 +62,6 @@
       "weight": 1.0,
       "tags": ["source_remotive"]
     },
-
     {
       "id": "himalayas_all",
       "type": "rss",
@@ -73,7 +71,6 @@
       "weight": 1.0,
       "tags": ["source_himalayas"]
     },
-
     {
       "id": "workanywhere_all",
       "type": "rss",
@@ -128,7 +125,6 @@
       "weight": 1.0,
       "tags": ["source_workanywhere", "cat_frontend"]
     },
-
     {
       "id": "realwork_anywhere_all",
       "type": "rss",
@@ -138,7 +134,6 @@
       "weight": 0.8,
       "tags": ["source_realwork"]
     },
-
     {
       "id": "jobicy_all",
       "type": "rss",
@@ -149,36 +144,57 @@
       "tags": ["source_jobicy"]
     }
   ],
-
   "filters": {
     "include_keywords": [
-      "engineer", "developer", "software", "backend", "frontend", "full stack", "fullstack",
-      "data", "analytics", "analyst", "machine learning", "ml", "ai",
-      "devops", "sre", "platform", "cloud",
-      "product manager", "product", "pm",
-      "designer", "ux", "ui"
+      "engineer",
+      "developer",
+      "software",
+      "backend",
+      "frontend",
+      "full stack",
+      "fullstack",
+      "data",
+      "analytics",
+      "analyst",
+      "machine learning",
+      "ml",
+      "ai",
+      "devops",
+      "sre",
+      "platform",
+      "cloud",
+      "product manager",
+      "product",
+      "designer",
+      "ux",
+      "ui",
+      "project manager",
+      "program manager",
+      "scrum master",
+      "delivery manager",
+      "implementation manager",
+      "event",
+      "community manager",
+      "support",
+      "customer"
     ],
     "exclude_keywords": [
-      "sales", "marketing", "seo", "copywriter", "account executive", "real estate",
-      "adult", "crypto casino", "onlyfans"
+      "sales",
+      "marketing",
+      "seo",
+      "copywriter",
+      "account executive",
+      "real estate",
+      "adult",
+      "crypto casino",
+      "onlyfans"
     ],
-
-    "geo_priority_keywords": [
-      "latam", "latin america",
-      "mexico", "brazil", "argentina", "chile", "colombia", "peru", "uruguay",
-      "paraguay", "bolivia", "ecuador", "venezuela", "panama",
-      "costa rica", "guatemala", "honduras", "el salvador", "nicaragua",
-      "dominican", "dominican republic", "puerto rico"
-    ],
-
     "remote_keywords": ["remote", "distributed", "work from home"],
-    "max_age_hours": 168,
     "require_remote": true
   },
-
   "formatting": {
     "title_template": "💼 Remote LATAM Jobs — {date_ru} • {time_ba} BA",
     "footer_tags": ["#jobs", "#remote", "#latam"],
-    "max_per_post": 12
+    "max_per_post": 8
   }
 }
